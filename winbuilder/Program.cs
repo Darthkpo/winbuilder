@@ -20,7 +20,6 @@ namespace winbuilder {
             string[] libs;
             string executableDir = "NULL";
             string objectDir = "NULL";
-            string subsystem = "CONSOLE";
 
             Console.WriteLine("Opening build file.");
 
@@ -68,11 +67,6 @@ namespace winbuilder {
                             tempLibs.Add(sline[1]);
                             break;
                         }
-                        case "SUB_SYS": {
-                            Console.WriteLine("SUB_SYS: {0}", sline[1]);
-                            subsystem = sline[1];
-                            break;
-                        }
                         default : {
                             Console.WriteLine("Failed to parse line: '{0}'.", line);
                             break;
@@ -99,36 +93,66 @@ namespace winbuilder {
 
             buildfile.Close();
 
-            string compileCommand = "cl /EHsc /MD " + mainSource;
+            string compileCommand = "cl /EHsc /MD /c " + mainSource;
 
-            if (Directory.Exists(sourceDir)) { 
+            if (Directory.Exists(sourceDir)) {
+
+                string changeFile = "build.cf";
+                List<string> prevSources = new List<string>();
+                List<long>   presSSizes  = new List<long>();
+                if (File.Exists(changeFile)) {
+                    StreamReader reader = new StreamReader(changeFile);
+                    while ((line = reader.ReadLine()) != null) {
+                        string[] sline = line.Split(':');
+                        prevSources.Add(sline[0]);
+                        presSSizes.Add(Convert.ToInt64(sline[1]));
+                    }
+                    reader.Close();
+                }
+
                 string[] sources = GetSources(sourceDir);
+                long[] sizes = new long[sources.Length];
+                StreamWriter sw = new StreamWriter(changeFile, false);
+                for (int i = 0; i < sources.Length; i++) {
+                    FileInfo info = new FileInfo(sources[i]);
+                    sizes[i] = info.Length;
+                    Console.WriteLine("Found: '{0}', {1} bytes.", sources[i], sizes[i]);
+                    sw.WriteLine("{0}:{1}", sources[i], sizes[i]);
+                }
+                sw.Close();
+
+                for (int i = 0; i < sources.Length; i++) {
+                    if (prevSources.Contains(sources[i])) {
+                        int index = prevSources.IndexOf(sources[i]);
+                        if (presSSizes[index] == sizes[i])
+                            sources[i] = "SKIP";
+
+                    }
+                }
+
                 foreach (string source in sources) {
-                    FileInfo info = new FileInfo(source);
-                    Console.WriteLine("Found: '{0}', {1} bytes.", source, info.Length);
-                    
-                    if (source.Equals(mainSource))
+                    if (source.Equals("SKIP"))
                         continue;
                     compileCommand = compileCommand + " " + source;
                 }
-                compileCommand = compileCommand + " /Fe.\\" + executableDir;
+                
                 compileCommand = compileCommand + " /Fo.\\" + objectDir;
                 foreach (string includeDir in includeDirs)
                     compileCommand = compileCommand + " /I.\\" + includeDir;
 
-                compileCommand = compileCommand + " /link";
+                string linkCommand = "link " + objectDir + "*.obj /ENTRY:mainCRTStartup";
                 foreach (string libPathDir in libpathsDirs)
-                    compileCommand = compileCommand + " /LIBPATH:.\\" + libPathDir;
+                    linkCommand = linkCommand + " /LIBPATH:.\\" + libPathDir;
 
                 foreach (string lib in libs)
-                    compileCommand = compileCommand + " " + lib;
-                compileCommand = compileCommand + " /SUBSYSTEM:" + subsystem;
-                
+                    linkCommand = linkCommand + " " + lib;
+                linkCommand = linkCommand + " /OUT:" + executableDir;
+
                 Process p = new Process();
                 p.StartInfo.UseShellExecute = false;
                 p.StartInfo.RedirectStandardOutput = true;
                 p.StartInfo.FileName = "cmd.exe";
-                p.StartInfo.Arguments = "/C w:\\shell.bat & " + compileCommand;
+                p.StartInfo.Arguments = "/C w:\\shell.bat & " + compileCommand + " & " + linkCommand;
                 p.Start();
                 string output = p.StandardOutput.ReadToEnd();
                 Console.WriteLine("{0}", output);
